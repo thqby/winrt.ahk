@@ -345,6 +345,7 @@ _rt_GetElementTypeMap() {
 }
 
 MethodWrapper(idx, iid, types, name:=unset) {
+    static readPtr, readInt64
     rettype := types.RemoveAt(1)
     cca := [] ;, cca.Length := 1 + 2*types.Length, ccac := 0
     stn := Map()
@@ -361,7 +362,13 @@ MethodWrapper(idx, iid, types, name:=unset) {
             if !InStr('Struct|Guid', String(t.FundamentalType))
                 MsgBox 'DEBUG: arg type ' String(t) ' of ' name ' is not a struct and has no ArgPassInfo'
             arg_size := t.Size
-            if arg_size <= 8 || A_PtrSize = 4 {
+            if arg_size <= 8 {  ; Simplified expanded small struct
+                if A_PtrSize == 8 || arg_size <= 4
+                    stn[1 + A_Index] := readPtr ?? readPtr := NumGet.Bind( , 'ptr'), cca.Push( , 'ptr')
+                else
+                    stn[1 + A_Index] := readInt64 ?? readInt64 := NumGet.Bind( , 'int64'), cca.Push( , 'int64')
+            }
+            else if A_PtrSize = 4 {
                 ; On x86, all structs need to be copied by value into the parameter list.
                 ; On x64, structs <= 8 bytes need to be copied but larger structs are
                 ; passed by value.
@@ -612,6 +619,7 @@ _rt_GetParameterizedIID(name, types) {
 }
 
 _rt_MetaDataLocate(this, pname, mdb) {
+    static is64bit := A_PtrSize == 8
     name := StrGet(pname, "UTF-16")
     ; mdb : IRoSimpleMetaDataBuilder -- unconventional interface with no base type
     try {
@@ -622,26 +630,34 @@ _rt_MetaDataLocate(this, pname, mdb) {
                 throw Error("GUID not found for " name)
             if p := InStr(name, "``") {
                 ; SetParameterizedInterface
-                ComCall(8, mdb, "ptr", pguid, "uint", SubStr(name, p + 1), "cdecl")
+                if is64bit
+                    ComCall(8, mdb, "ptr", pguid, "uint", SubStr(name, p + 1))
+                else ComCall(8, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid, 8, "int64"), "uint", SubStr(name, p + 1))
             }
             else {
                 ; SetWinRtInterface
-                ComCall(0, mdb, "ptr", pguid, "cdecl")
+                if is64bit
+                    ComCall(0, mdb, "ptr", pguid)
+                else ComCall(0, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid, 8, "int64"))
             }
         case "Object":
             t := WinRT.GetType(name).Class.__DefaultInterface
             ; SetRuntimeClassSimpleDefault
-            ComCall(4, mdb, "ptr", pname, "wstr", t.Name, "ptr", t.GUID, "cdecl")
+            ComCall(4, mdb, "ptr", pname, "wstr", t.Name, "ptr", t.GUID)
         case "Delegate":
             if !(pguid := t.GUID)
                 throw Error("GUID not found for " name)
             if p := InStr(name, "``") {
                 ; SetParameterizedDelete
-                ComCall(9, mdb, "ptr", pguid, "uint", SubStr(name, p + 1), "cdecl")
+                if is64bit
+                    ComCall(9, mdb, "ptr", pguid, "uint", SubStr(name, p + 1))
+                else ComCall(9, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid, 8, "int64"), "uint", SubStr(name, p + 1))
             }
             else {
                 ; SetDelegate
-                ComCall(1, mdb, "ptr", pguid, "cdecl")
+                if is64bit
+                    ComCall(1, mdb, "ptr", pguid)
+                else ComCall(1, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid, 8, "int64"))
             }
         case "Struct":
             names := []
@@ -649,10 +665,10 @@ _rt_MetaDataLocate(this, pname, mdb) {
                 names.Push(String(field.type))
             namePtrArr := _rt_stringPointerArray(names)
             ; SetStruct
-            ComCall(6, mdb, "ptr", pname, "uint", names.Length, "ptr", namePtrArr, "cdecl")
+            ComCall(6, mdb, "ptr", pname, "uint", names.Length, "ptr", namePtrArr)
         case "Enum":
             ; SetEnum
-            ComCall(7, mdb, "ptr", pname, "wstr", t.Class.__basicType.Name, "cdecl")
+            ComCall(7, mdb, "ptr", pname, "wstr", t.Class.__basicType.Name)
         default:
             throw Error('Unsupported fundamental type')
         }
