@@ -292,25 +292,36 @@ _rt_CacheAttributeCtors(mdi, o, retprop) {
 
 _rt_GetFieldConstant(mdi, field) {
     mdt := ComObjQuery(mdi, "{D8F579AB-402D-4B8E-82D9-5D63B1065C68}") ; IMetaDataTables
-    
+
     static tabConstant := 11, GetTableInfo := 9
     ComCall(GetTableInfo, mdt, "uint", tabConstant
         , "ptr", 0, "uint*", &cRows := 0, "ptr", 0, "ptr", 0, "ptr", 0)
-    
+
     static colType := 0, colParent := 1, colValue := 2, GetColumn := 13, GetBlob := 15
-    Loop cRows {
-        ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colParent, "uint", A_Index, "uint*", &value:=0)
-        if value != field
-            continue
-        ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colValue, "uint", A_Index, "uint*", &value:=0)
-        ComCall(GetBlob, mdt, "uint", value, "uint*", &ndata:=0, "ptr*", &pdata:=0)
-        ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colType, "uint", A_Index, "uint*", &value:=0)
-        ; Type must be one of the basic element types (2..14) or CLASS (18) with value 0.
-        ; WinRT only uses constants for enums, always I4 (8) or U4 (9).
-        static primitives := _rt_GetElementTypeMap()
-        return primitives[value].ReadWriteInfo.GetReader()(pdata)
-        ;return {ptr: pdata, size: ndata}
+    i := 1, k := cRows
+    ; Assume that the constant table is ordered
+    while i <= k {
+        ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colParent, "uint", index := (k + i) >> 1, "uint*", &value := 0)
+        if value == field
+            goto ret
+        if value > field
+            k := index - 1
+        else i := index + 1
     }
+    loop cRows
+        ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colParent, "uint", index := A_Index, "uint*", &value := 0)
+    until value = field
+    if value != field
+        return
+ret:
+    ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colValue, "uint", index, "uint*", &value := 0)
+    ComCall(GetBlob, mdt, "uint", value, "uint*", &ndata := 0, "ptr*", &pdata := 0)
+    ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colType, "uint", index, "uint*", &value := 0)
+    ; Type must be one of the basic element types (2..14) or CLASS (18) with value 0.
+    ; WinRT only uses constants for enums, always I4 (8) or U4 (9).
+    static primitives := _rt_GetElementTypeMap()
+    return primitives[value].ReadWriteInfo.GetReader()(pdata)
+    ;return {ptr: pdata, size: ndata}
 }
 
 _rt_GetElementTypeMap() {
