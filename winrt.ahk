@@ -17,8 +17,8 @@ MAX_NAME_CCH := 1024
     - WinRT.GetType(name) returns a TypeInfo for the given type.
 */
 class WinRT {
-    static Call(p) => (
-        p is String ? this.GetType(p).Class :
+    static Call(p, m := 0) => (
+        p is String ? this.GetType(p, m).Class :
         p is Object ? (ObjAddRef(p.ptr), _rt_WrapInspectable(p.ptr)) :
         _rt_WrapInspectable(p)
     )
@@ -39,6 +39,27 @@ class WinRT {
             ; Map the simple types in cache, for parsing generic type names.
             cache[t.Name] := t
         }
+        ; win32 types
+        for e, t in Map(
+            'PSTR', BasicTypeInfo('String', {
+                ArgPassInfo: ArgPassInfo('astr', false, false),
+                ReadWriteInfo: {
+                    Size: A_PtrSize,
+                    GetReader: (this, offset:=0) => (ptr) => StrGet(ptr + offset, 'cp0')
+                }
+            }),
+            'PWSTR', BasicTypeInfo('String', {
+                ArgPassInfo: ArgPassInfo('wstr', false, false),
+                ReadWriteInfo: {
+                    Size: A_PtrSize,
+                    GetReader: (this, offset:=0) => (ptr) => StrGet(ptr + offset)
+                }
+            }),
+            'BSTR', BasicTypeInfo('BSTR', {
+                ArgPassInfo: ArgPassInfo('wstr', false, (p) => (s := StrGet(p), DllCall('oleaut32\SysFreeString', 'ptr', p), s))
+            })
+        )
+            cache['Windows.Win32.Foundation.' e] := t
         this.DefineProp('__set', {call: RtAny.__set})
     }
     
@@ -57,7 +78,7 @@ class WinRT {
         return cache.get(mn := m.Name, false) || cache[mn] := m
     }
     
-    static _CacheGetTypeNS(name) {
+    static _CacheGetTypeNS(name, md := 0) {
         if !(p := InStr(name, ".",, -1))
             throw ValueError("Invalid typename", -1, name)
         static cache := Map()
@@ -65,7 +86,7 @@ class WinRT {
         ; must be defined within the same file (but child namespaces can be defined
         ; in a different file).
         try {
-            if m := cache.get(ns := SubStr(name, 1, p-1), false) {
+            if m := md || cache.get(ns := SubStr(name, 1, p-1), false) {
                 ; Module already loaded - find the TypeDef within it.
                 td := m.FindTypeDefByName(name)
             }
@@ -76,21 +97,21 @@ class WinRT {
             }
         }
         catch OSError as e {
-            if e.number = 0x80073D54 {
-                e.message := "(0x80073D54) Type not found."
+            if md && e.number = 0x80131130
+                return this._CacheGetTypeNS(name)
+            if e.number = 0x80073D54 || e.number = 0x8000000F
                 e.extra := name
-            }
             throw
         }
         return RtTypeInfo(m, td)
     }
     
-    static _CacheGetType(name) {
+    static _CacheGetType(name, md := 0) {
         if p := InStr(name, "<") {
             baseType := this.GetType(baseName := SubStr(name, 1, p-1))
             typeArgs := []
             while RegExMatch(name, "\G([^<>,]++(?:<(?:(?1)(?:,|(?=>)))++>)?)(?=[,>])", &m, ++p) {
-                typeArgs.Push(this.GetType(m.0))
+                typeArgs.Push(this.GetType(m.0, md))
                 p += m.Len
             }
             if p != StrLen(name) + 1
@@ -101,14 +122,14 @@ class WinRT {
                 base: baseType.base
             }
         }
-        return this._CacheGetTypeNS(name)
+        return this._CacheGetTypeNS(name, md)
     }
     
-    static GetType(name) {
+    static GetType(name, md := 0) {
         static cache := this.TypeCache
         ; Cache typeinfo by full name.
         return cache.get(name, false)
-            || cache[name] := this._CacheGetType(name)
+            || cache[name] := this._CacheGetType(name, md)
     }
 }
 
@@ -118,14 +139,14 @@ class RtMetaDataModule extends MetaDataModule {
         switch (t >> 24) {
         case 0x01: ; TypeRef (most common)
             ; TODO: take advantage of GetTypeRefProps's scope parameter
-            return WinRT.GetType(this.GetTypeRefProps(t))
+            return WinRT.GetType(this.GetTypeRefProps(t), this)
         case 0x02: ; TypeDef
-            MsgBox 'DEBUG: GetTypeByToken was called with a TypeDef token.`n`n' Error().Stack
+            ; MsgBox 'DEBUG: GetTypeByToken was called with a TypeDef token.`n`n' Error().Stack
             ; TypeDefs usually aren't referenced directly, so just resolve it by
             ; name to ensure caching works correctly.  Although GetType resolving
             ; the TypeDef will be a bit redundant, it should perform the same as
             ; if a TypeRef token was passed in.
-            return WinRT.GetType(this.GetTypeDefProps(t))
+            return WinRT.GetType(this.GetTypeDefProps(t), this)
         case 0x1b: ; TypeSpec
             ; GetTypeSpecFromToken
             ComCall(44, this, "uint", t, "ptr*", &psig:=0, "uint*", &nsig:=0)

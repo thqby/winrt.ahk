@@ -41,9 +41,9 @@ _rt_CreateEnumWrapper(t) {
     def '__item', items := Map()
     for f in t.Fields() {
         switch f.flags {
-            case 0x601: ; Private | SpecialName | RTSpecialName
+            case 0x601, 0x606: ; Private | SpecialName | RTSpecialName, Public | SpecialName | RTSpecialName
                 def '__basicType', f.type
-            case 0x8056: ; public | static | literal | hasdefault
+            case 0x8056: ; Public | Static | Literal | HasDefault
                 def f.name, items[f.value] := {n: f.value, s: f.name, base: w.prototype}
         }
     }

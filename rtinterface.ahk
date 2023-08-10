@@ -2,28 +2,44 @@
 #include ffi.ahk
 
 class RtTypeInfo {
-    __new(mdm, token, typeArgs:=false) {
-        this.m := mdm
-        this.t := token
-        this.typeArgs := typeArgs
-        
+    static Call(mdm, token, typeArgs:=false) {
         ; Determine the base type and corresponding RtTypeInfo subclass.
-        mdm.GetTypeDefProps(token, &flags, &tbase)
-        this.IsSealed := flags & 0x100 ; tdSealed (not composable; can't be subclassed)
+        name := mdm.GetTypeDefProps(token, &flags, &tbase)
+        IsSealed := flags & 0x100 ; tdSealed (not composable; can't be subclassed)
+        base := RtTypeInfo.Prototype
         switch {
             case flags & 0x20:
-                this.base := RtTypeInfo.Interface.Prototype
+                base := RtTypeInfo.Interface.Prototype
             case (tbase & 0x00ffffff) = 0:  ; Nil token.
-                throw Error(Format('Type "{}" has no base type or interface flag (flags = 0x{:x})', this.Name, flags))
+                throw Error(Format('Type "{}" has no base type or interface flag (flags = 0x{:x})', name, flags))
             default:
-                basetype := this.m.GetTypeByToken(tbase)
+                basetype := mdm.GetTypeByToken(tbase)
                 if basetype is RtTypeInfo
-                    this.base := basetype.base
+                    base := basetype.base
                 else if basetype.hasProp('TypeClass')
-                    this.base := basetype.TypeClass.Prototype
+                    base := basetype.TypeClass.Prototype
                 ;else: just leave RtTypeInfo as base.
-                this.SuperType := basetype
+
+                ; some win32 types are defined as structure
+                if basetype.Name = 'Struct' {
+                    ComCall(20, mdm, 'ptr*', &henum := 0, 'uint', token, 'ptr', buf := Buffer(8), 'uint', 2, 'uint*', &cTokens := 0, 'int')
+                    ComCall(3, mdm, 'uint', henum, 'int')
+                    if cTokens = 1 {
+                        namebuf := Buffer(2 * MAX_NAME_CCH)
+                        ComCall(57, mdm, 'uint', NumGet(buf, 'uint'), 'ptr', 0
+                            , 'ptr', namebuf, 'uint', namebuf.size // 2, 'uint*', &namelen := 0
+                            , 'ptr*', &flags := 0, 'ptr*', &psig := 0, 'uint*', &nsig := 0
+                            , 'ptr', 0, 'ptr', 0, 'ptr', 0)
+                        if StrGet(namebuf, namelen, 'UTF-16') = 'Value' {
+                            type := String(_rt_DecodeSigType(mdm, &p := psig + 1, psig + nsig))
+                            if type = 'Void*'
+                                return FFITypes.IntPtr
+                            try return FFITypes.%type%
+                        }
+                    }
+                }
         }
+        return { base: base, m: mdm, t: token, typeArgs: typeArgs, IsSealed: IsSealed, SuperType: basetype? }
     }
     
     class Interface extends RtTypeInfo {
@@ -75,7 +91,7 @@ class RtTypeInfo {
     GUID => _rt_memoize(this, 'GUID')
     _init_GUID() => this.typeArgs
         ? _rt_GetParameterizedIID(this.m.GetTypeDefProps(this.t), this.typeArgs)
-        : Guid(GuidToString(this.m.GetGuidPtr(this.t)))
+        : (p := this.m.GetGuidPtr(this.t)) && Guid(GuidToString(p))
     
     ; Whether this class type supports direct activation (IActivationFactory).
     HasIActivationFactory => _rt_Enumerator(53, this.m, "uint", this.t, "uint", this.m.ActivatableAttr)(&_)
@@ -189,8 +205,9 @@ class RtTypeMod extends RtDecodedType {
 }
 
 class RtPtrType extends RtTypeMod {
-    ArgPassInfo => ArgPassInfo.Unsupported
+    ArgPassInfo => FFITypes.IntPtr.ArgPassInfo
     ToString() => String(this.inner) "*"
+    ReadWriteInfo => false
 }
 
 class RefObjPtrAdapter {

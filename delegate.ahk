@@ -33,7 +33,11 @@ GetReadersForArgTypes(argTypes) {
 }
 
 class DelegateFactory {
-    __new(iid, argTypes, retType:=false) {
+    __new(iid, argTypes, retType := false) {
+        if (!iid) {
+            this.DefineProp('Call', { call: CreateCallback.Bind(, GetReadersForArgTypes(argTypes), retType) })
+            return
+        }
         this.cb := cb := CreateComMethodCallback('Call', argTypes, retType)
         this.mtbl := CreateComMethodTable([cb.ptr], iid)
         this.pmtbl := this.mtbl.ptr + 16
@@ -50,12 +54,12 @@ class DelegateFactory {
 }
 
 CreateComMethodTable(callbacks, iid) {
-    iunknown_addRef(this) {
+    static iunknown_addRef(this) {
         ; ++this.refCount
         NumPut("ptr", refCount := NumGet(this, A_PtrSize, "ptr") + 1, this, A_PtrSize)
         return refCount
     }
-    iunknown_release(this) {
+    static iunknown_release(this) {
         ; if !--this.refCount
         NumPut("ptr", refCount := NumGet(this, A_PtrSize, "ptr") - 1, this, A_PtrSize)
         if !refCount {
@@ -65,7 +69,7 @@ CreateComMethodTable(callbacks, iid) {
         }
         return refCount
     }
-    iunknown_queryInterface(this, riid, ppvObject) {
+    static iunknown_queryInterface(this, riid, ppvObject) {
         riid := GuidToString(riid)
         iid := GuidToString(NumGet(this, "ptr") - 16)
         switch riid {
@@ -112,6 +116,28 @@ CreateComMethodCallback(name, argTypes, retType:=false) {
         return 0
     }
     return CallbackRevoker(interface_method, "&", retOffset // A_PtrSize + (retType ? 2 : 1))
+}
+
+CreateCallback(fn, readers, retType:=false) {
+    ; writeRet := retType && retType != FFITypes.Void
+    ;     && ReadWriteInfo.ForType(retType).GetWriter(0)
+    retOffset := readers.NativeSize
+    wrap(argPtr) {
+        try {
+            args := []
+            for readArg in readers
+                args.Push(readArg(argPtr))
+            retval := fn(args*)
+            ; (writeRet) && writeRet(NumGet(argPtr, retOffset, 'ptr'), retval)
+            return retval
+        }
+        catch Any as e {
+            ; @Debug-Breakpoint => {e.__Class} thrown in method {name}: {e.Message}
+            return e is OSError ? e.number : 0x80004005
+        }
+        return 0
+    }
+    return CallbackRevoker(wrap, "&", retOffset // A_PtrSize + 1)
 }
 
 class CallbackRevoker {

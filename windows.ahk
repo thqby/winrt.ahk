@@ -2,11 +2,14 @@
 
 class RtNamespace {
     static __new() {
+        this.DeleteProp '__new'
         this.DefineProp '__set', {call: RtAny.__set}
         this.prototype.DefineProp '__set', {call: RtAny.__set}
+        this.prototype.DefineProp '_path', {value: ''}
     }
-    __new(name) {
+    __new(name, path?) {
         this.DefineProp '_name', {value: name}
+        IsSet(path) && this.DefineProp('_path', {value: path})
     }
     __call(name, params) => this.__get(name, [])(params*)
     __get(name, params) {
@@ -14,9 +17,9 @@ class RtNamespace {
         if this.HasOwnProp(name)
             return params.Length ? this.%name%[params*] : this.%name%
         try
-            cls := WinRT(typename := this._name "." name)
+            cls := WinRT(typename := this._name "." name, this._m)
         catch OSError as e {
-            throw (e.number != 0x80073D54 || e.extra != typename) ? e
+            throw (e.extra != typename) ? e
                 : PropertyError("Unknown property, class or namespace", -1, typename)
         }
         this.DefineProp name, {get: this => cls, call: (this, p*) => cls(p*)}
@@ -57,7 +60,7 @@ class RtNamespace {
         if this.HasOwnProp('_m')
             return
         this.DefineProp '_m', {
-            value: m := RtMetaDataModule.Open(RtNamespace.GetPath(this._name))
+            value: m := RtMetaDataModule.Open(this._path || RtNamespace.GetPath(this._name))
         }
         prefix := this._name '.'
         ; Find all namespaces strings in this module.

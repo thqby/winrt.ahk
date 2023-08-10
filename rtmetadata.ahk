@@ -86,6 +86,34 @@ class MetaDataModule {
                 , "ptr", oiid
                 , "ptr*", w, "hresult")
         }
+        else if (name_prefix := w.prototype.__class) ~= '\.Apis$' {
+            name_prefix .= "."
+            mdt := ComObjQuery(this, "{D8F579AB-402D-4B8E-82D9-5D63B1065C68}") ; IMetaDataTables
+            fns := Map(), fns.CaseSense := false
+            for method in t.Methods() {
+                if !(method.flags & 0x10)   ; Static
+                    break
+                if !index := _rt_FindTableIndex(mdt, 0x1c, 1, method.t)
+                    break
+                types := t.MethodArgTypes(method.sig)
+                ; ImportName
+                ComCall(13, mdt, "uint", 0x1c, "uint", 2, "uint", index, "uint*", &value := 0)
+                ComCall(14, mdt, "uint", value, "ptr*", &name := 0)
+                name := StrGet(name, "UTF-8")
+                ; ImportScope
+                ComCall(13, mdt, "uint", 0x1c, "uint", 3, "uint", index, "uint*", &value := 0)
+                ; GetModuleRefProps
+                ComCall(42, this, 'uint', value, 'ptr', namebuf := Buffer(2 * MAX_NAME_CCH), 'uint', MAX_NAME_CCH, 'uint*', &chName := 0)
+                dllname := StrGet(namebuf, chName)
+                wrapper := DllImportWrapper(dllname, name, types, name_prefix method.name)
+                ; AddMethodOverloadTo(w, name, wrapper, name_prefix)
+                fns[name] := wrapper
+            }
+            if fns.Count {
+                w.DefineProp('__Item', { value: fns })
+                w.DefineProp('__Call', { call: (this, name, params) => this[name](params*) })
+            }
+        }
         wrapped := Map()
         addRequiredInterfaces(wp, t, isclass) {
             for ti, impl in t.Implements() {
@@ -282,38 +310,41 @@ _rt_CacheAttributeCtors(mdi, o, retprop) {
         , psig => 'StaticAttr')
     
     searchFor("Windows.Foundation.Metadata.ActivatableAttribute"
-        , psig => NumGet(psig, 3, "uchar") = 9 ? 'ActivatableAttr' : 'FactoryAttr') ; 9 = uint (first arg is uint, not interface name)
+        , psig => !psig || NumGet(psig, 3, "uchar") = 9 ? 'ActivatableAttr' : 'FactoryAttr') ; 9 = uint (first arg is uint, not interface name)
     
     searchFor("Windows.Foundation.Metadata.ComposableAttribute"
         , psig => 'ComposableAttr')
     
-    return o.%retprop%
+    return o.HasOwnProp(retprop) ? o.%retprop% : -1
 }
 
-_rt_GetFieldConstant(mdi, field) {
-    mdt := ComObjQuery(mdi, "{D8F579AB-402D-4B8E-82D9-5D63B1065C68}") ; IMetaDataTables
-
-    static tabConstant := 11, GetTableInfo := 9
-    ComCall(GetTableInfo, mdt, "uint", tabConstant
+_rt_FindTableIndex(mdt, tabIndex, colIndex, findVal) {
+    static GetTableInfo := 9, GetColumn := 13
+    ComCall(GetTableInfo, mdt, "uint", tabIndex
         , "ptr", 0, "uint*", &cRows := 0, "ptr", 0, "ptr", 0, "ptr", 0)
-
-    static colType := 0, colParent := 1, colValue := 2, GetColumn := 13, GetBlob := 15
     i := 1, k := cRows
-    ; Assume that the constant table is ordered
+    ; Assume that the table is ordered
     while i <= k {
-        ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colParent, "uint", index := (k + i) >> 1, "uint*", &value := 0)
-        if value == field
-            goto ret
-        if value > field
+        ComCall(GetColumn, mdt, "uint", tabIndex, "uint", colIndex, "uint", index := (k + i) >> 1, "uint*", &value := 0)
+        if value == findVal
+            return index
+        if value > findVal
             k := index - 1
         else i := index + 1
     }
-    loop cRows
-        ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colParent, "uint", index := A_Index, "uint*", &value := 0)
-    until value = field
-    if value != field
+    loop cRows {
+        ComCall(GetColumn, mdt, "uint", tabIndex, "uint", colIndex, "uint", A_Index, "uint*", &value := 0)
+        if value = findVal
+            return A_Index
+    }
+    return 0
+}
+
+_rt_GetFieldConstant(mdi, field) {
+    static tabConstant := 11,  colType := 0, colParent := 1, colValue := 2, GetColumn := 13, GetBlob := 15
+    mdt := ComObjQuery(mdi, "{D8F579AB-402D-4B8E-82D9-5D63B1065C68}") ; IMetaDataTables
+    if !index := _rt_FindTableIndex(mdt, tabConstant, colParent, field)
         return
-ret:
     ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colValue, "uint", index, "uint*", &value := 0)
     ComCall(GetBlob, mdt, "uint", value, "uint*", &ndata := 0, "ptr*", &pdata := 0)
     ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colType, "uint", index, "uint*", &value := 0)
@@ -343,7 +374,9 @@ _rt_GetElementTypeMap() {
             0xc, 'Single',
             0xd, 'Double',
             0xe, 'String',
+            ; 0x16, 'TypedReference'
             0x18, 'IntPtr',
+            0x19, 'UIntPtr',
             0x1c, 'Object',
         ]
         i := 1
@@ -430,6 +463,77 @@ MethodWrapper(idx, iid, types, name:=unset) {
     return fc
 }
 
+DllImportWrapper(dll, fn, types, name) {
+    static readPtr, readInt64
+    rettype := types.RemoveAt(1)
+    cca := []
+    stn := Map()
+    args_to_expand := Map()
+    for t in types {
+        if pass := t.ArgPassInfo {
+            if pass.ScriptToNative
+                stn[A_Index] := pass.ScriptToNative
+            cca.Push(, pass.NativeType)
+        } else {
+            if !InStr('Struct|Guid', String(t.FundamentalType))
+                MsgBox 'DEBUG: arg type ' String(t) ' of ' name ' is not a struct and has no ArgPassInfo'
+            arg_size := t.Size
+            if arg_size <= 8 {  ; Simplified expanded small struct
+                if A_PtrSize == 8 || arg_size <= 4
+                    stn[A_Index] := readPtr ?? readPtr := NumGet.Bind(, 'ptr'), cca.Push(, 'ptr')
+                else
+                    stn[A_Index] := readInt64 ?? readInt64 := NumGet.Bind(, 'int64'), cca.Push(, 'int64')
+            } else if A_PtrSize = 4 {
+                args_to_expand[A_Index] := arg_size
+                loop Ceil(arg_size / A_PtrSize)
+                    cca.Push(, 'ptr')
+            } else {
+                cca.Push(, 'ptr')
+            }
+        }
+    }
+    fri := frr := false
+    if rettype != FFITypes.Void
+        if pass := rettype.ArgPassInfo
+            cca.Push(, pass.NativeType)
+        else switch (cls := rettype.Class, rettype.Size) {
+            case 1: cca.Push(, 'char'), frr := val2struct.Bind('char', cls)
+            case 2: cca.Push(, 'short'), frr := val2struct.Bind('short', cls)
+            case 4: cca.Push(, 'int'), frr := val2struct.Bind('int', cls)
+            case 8: cca.Push(, 'int64'), frr := val2struct.Bind('int64', cls)
+            default: fri := cls, cca.InsertAt(1, , 'ptr')
+        }
+    (!cca.Length) && cca.Length := 1
+    cca[1] := (mod := DllCall('GetModuleHandle', 'str', dll, 'ptr')) ? DllCall('GetProcAddress', 'ptr', mod, 'astr', fn, 'ptr') : dll '\' fn
+    fc := DllCall.Bind(cca*)
+    if args_to_expand.Count
+        fc := _rt_get_struct_expander(args_to_expand, fc)
+    if IsSet(name)
+        fc.DefineProp 'Name', {value: name}
+    fc.DefineProp 'MinParams', pv := {value: types.Length}
+    fc.DefineProp 'MaxParams', pv
+    fc := _rt_call.Bind(fc, stn, fri, frr)
+    fc.DefineProp 'MinParams', pv
+    fc.DefineProp 'MaxParams', pv
+    return fc
+    _rt_call(fc, fa, fri, frr, args*) {
+        try {
+            if args.Length != fc.MinParams
+                throw Error(Format('Too {} parameters passed to function {}.', args.Length < fc.MinParams ? 'few' : 'many', fc.Name), -1)
+            for i, f in fa
+                args[i] := f(args[i])
+            (fri) && args.InsertAt(1, fri())
+            ret := fc(args*)
+            return frr ? frr(ret) : fri ? args[1] : ret
+        } catch OSError as e {
+            _rt_rethrow(fc, e)
+        }
+    }
+    val2struct(types, cls, val) {
+        NumPut(Type, val, s := cls())
+        return s
+    }
+}
 
 _rt_get_struct_expander(sizes, fc) {
     ; Map the incoming parameter index and size to outgoing parameter index and size.
@@ -480,6 +584,18 @@ _rt_call(fc, fa, fri, frr, args*) {
     }
 }
 
+_dll_call(fc, fa, frr, args*) {
+    try {
+        if args.Length != fc.MinParams
+            throw Error(Format('Too {} parameters passed to function {}.', args.Length < fc.MinParams ? 'few' : 'many', fc.Name), -1)
+        for i, f in fa
+            args[i] := f(args[i])
+        ret := fc(args*)
+        return frr ? frr(ret) : ret
+    } catch OSError as e {
+        _rt_rethrow(fc, e)
+    }
+}
 
 class RtAny {
     static __new() {
@@ -638,15 +754,17 @@ _rt_MetaDataLocate(this, pname, mdb) {
                 throw Error("GUID not found for " name)
             if p := InStr(name, "``") {
                 ; SetParameterizedInterface
-                if A_PtrSize = 8
+                if A_PtrSize = 8 ; x64
                     ComCall(8, mdb, "ptr", pguid, "uint", SubStr(name, p + 1))
-                else ComCall(8, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid, 8, "int64"), "uint", SubStr(name, p + 1))
+                else
+                    ComCall(8, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid + 8, "int64"), "uint", SubStr(name, p + 1))
             }
             else {
                 ; SetWinRtInterface
-                if A_PtrSize = 8
+                if A_PtrSize = 8 ; x64
                     ComCall(0, mdb, "ptr", pguid)
-                else ComCall(0, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid, 8, "int64"))
+                else
+                    ComCall(0, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid + 8, "int64"))
             }
         case "Object":
             t := WinRT.GetType(name).Class.__DefaultInterface
@@ -657,15 +775,17 @@ _rt_MetaDataLocate(this, pname, mdb) {
                 throw Error("GUID not found for " name)
             if p := InStr(name, "``") {
                 ; SetParameterizedDelete
-                if A_PtrSize = 8
+                if A_PtrSize = 8 ; x64
                     ComCall(9, mdb, "ptr", pguid, "uint", SubStr(name, p + 1))
-                else ComCall(9, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid, 8, "int64"), "uint", SubStr(name, p + 1))
+                else
+                    ComCall(9, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid + 8, "int64"), "uint", SubStr(name, p + 1))
             }
             else {
                 ; SetDelegate
-                if A_PtrSize = 8
+                if A_PtrSize = 8 ; x64
                     ComCall(1, mdb, "ptr", pguid)
-                else ComCall(1, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid, 8, "int64"))
+                else
+                    ComCall(1, mdb, "int64", NumGet(pguid, "int64"), "int64", NumGet(pguid + 8, "int64"))
             }
         case "Struct":
             names := []
