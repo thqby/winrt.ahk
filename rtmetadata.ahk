@@ -155,7 +155,7 @@ class MetaDataModule {
             name := nameoverride ? nameoverride : method.name
             types := t.MethodArgTypes(method.sig)
             wrapper := MethodWrapper(5 + A_Index, iid, types, name_prefix name)
-            if method.flags & 0x400 { ; tdSpecialName
+            if method.flags & 0x800 { ; mdSpecialName
                 switch SubStr(name, 1, 4) {
                 case "get_":
                     w.DefineProp(SubStr(name, 5), {Get: wrapper})
