@@ -39,7 +39,7 @@ class RtTypeInfo {
                     }
                 }
         }
-        return { base: base, m: mdm, t: token, typeArgs: typeArgs, IsSealed: IsSealed, SuperType: basetype? }
+        return { base: base, m: mdm, t: token, flags: flags, typeArgs: typeArgs, IsSealed: IsSealed, SuperType: basetype? }
     }
     
     class Interface extends RtTypeInfo {

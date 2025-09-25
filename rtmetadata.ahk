@@ -86,8 +86,8 @@ class MetaDataModule {
                 , "ptr", oiid
                 , "ptr*", w, "hresult")
         }
-        else if (name_prefix := w.prototype.__class) ~= '\.Apis$' {
-            name_prefix .= "."
+        else if (t.flags & 0x181) {    ; Public | Abstract | Sealed
+            name_prefix .= w.prototype.__class "."
             mdt := ComObjQuery(this, "{D8F579AB-402D-4B8E-82D9-5D63B1065C68}") ; IMetaDataTables
             fns := Map(), fns.CaseSense := false
             for method in t.Methods() {
@@ -112,6 +112,10 @@ class MetaDataModule {
             if fns.Count {
                 w.DefineProp('__Item', { value: fns })
                 w.DefineProp('__Call', { call: (this, name, params) => this[name](params*) })
+            }
+            for f in t.Fields() {
+                if f.flags == 0x8056 ; Public | Static | Literal | HasDefault
+                    w.DefineProp(f.name, { value: f.value })
             }
         }
         wrapped := Map()
@@ -351,6 +355,8 @@ _rt_GetFieldConstant(mdi, field) {
     ; Type must be one of the basic element types (2..14) or CLASS (18) with value 0.
     ; WinRT only uses constants for enums, always I4 (8) or U4 (9).
     static primitives := _rt_GetElementTypeMap()
+    if value == 14  ; utf-16 string
+        return StrGet(pdata, -(ndata >> 1))
     return primitives[value].ReadWriteInfo.GetReader()(pdata)
     ;return {ptr: pdata, size: ndata}
 }
