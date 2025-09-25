@@ -45,18 +45,22 @@ class WinRT {
                 ArgPassInfo: ArgPassInfo('astr', false, false),
                 ReadWriteInfo: {
                     Size: A_PtrSize,
-                    GetReader: (this, offset:=0) => (ptr) => StrGet(ptr + offset, 'cp0')
+                    GetReader: (this, offset := 0) => (ptr) => StrGet(NumGet(ptr, offset, 'ptr'), 'cp0'),
+                    GetWriter: (this, offset := 0) => ReadWriteInfo.Unimplemented,
+                    GetDeleter: (*) => 0
                 }
             }),
             'PWSTR', BasicTypeInfo('String', {
                 ArgPassInfo: ArgPassInfo('wstr', false, false),
                 ReadWriteInfo: {
                     Size: A_PtrSize,
-                    GetReader: (this, offset:=0) => (ptr) => StrGet(ptr + offset)
+                    GetReader: (this, offset := 0) => (ptr) => StrGet(NumGet(ptr, offset, 'ptr')),
+                    GetWriter: (this, offset := 0) => ReadWriteInfo.Unimplemented,
+                    GetDeleter: (*) => 0
                 }
             }),
             'BSTR', BasicTypeInfo('BSTR', {
-                ArgPassInfo: ArgPassInfo('wstr', false, (p) => (s := StrGet(p), DllCall('oleaut32\SysFreeString', 'ptr', p), s))
+                ArgPassInfo: ArgPassInfo('ptr', false, (p) => (s := StrGet(p), DllCall('oleaut32\SysFreeString', 'ptr', p), s))
             })
         )
             cache['Windows.Win32.Foundation.' e] := t

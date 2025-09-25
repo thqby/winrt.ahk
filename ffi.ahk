@@ -124,6 +124,10 @@ class ReadWriteInfo {
             || (api := typeinfo.ArgPassInfo) && this.FromArgPassInfo(api)
             || this.FromClass(typeinfo.Class)
     }
+
+    static Unimplemented(*) {
+        throw Error('unimplemented')
+    }
     
     class FromArgPassInfo extends ReadWriteInfo {
         __new(api) {

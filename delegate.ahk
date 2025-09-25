@@ -118,7 +118,9 @@ CreateComMethodCallback(name, argTypes, retType:=false) {
     return CallbackRevoker(interface_method, "&", retOffset // A_PtrSize + (retType ? 2 : 1))
 }
 
-CreateCallback(fn, readers, retType:=false) {
+CreateCallback(fn, readers, retType := false) {
+    if IsInteger(fn) || fn is CallbackRevoker
+        return fn
     ; writeRet := retType && retType != FFITypes.Void
     ;     && ReadWriteInfo.ForType(retType).GetWriter(0)
     retOffset := readers.NativeSize

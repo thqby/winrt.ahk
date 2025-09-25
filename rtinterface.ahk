@@ -272,6 +272,24 @@ class RtArrayType extends RtTypeMod {
     ToString() => String(this.inner) "[]"
 }
 
+class RtCArrayType extends RtTypeMod {
+    __new(inner, bounds) {
+        this.inner := inner, tp := String(inner)
+        rwi := ReadWriteInfo.ForType(inner), sz := rwi.Size
+        for b in bounds
+            tp .= '[' b ']', sz *= b
+        this.DefineProp('ToString', { call: _ => tp })
+        this.ReadWriteInfo := {
+            Size: sz,
+            Align: rwi.HasProp('Align') ? rwi.Align : rwi.Size,
+            GetReader: (this, offset := 0) => ReadWriteInfo.Unimplemented,
+            GetWriter: (this, offset := 0) => ReadWriteInfo.Unimplemented,
+            GetDeleter: (*) => 0
+        }
+    }
+    ArgPassInfo => FFITypes.IntPtr.ArgPassInfo
+}
+
 _rt_EnumAttrWithTypeArg(mdi, t, attr) {
     attrToType(&v) {
         ; GetCustomAttributeProps
@@ -356,6 +374,11 @@ _rt_DecodeSigType(m, &p, p2, typeArgs:=false, mdScope := 0) {
             if typeArgs
                 return typeArgs[NumGet(p++, "uchar") + 1]
             return RtTypeArg(NumGet(p++, "uchar") + 1)
+        case 0x14: ; ARRAY <CorElementType value> <rank> <count1> <bound1> ... <countN> <boundN>
+            ele := _rt_DecodeSigType(m, &p, p2, typeArgs, mdScope), bounds := []
+            loop rank := CorSigUncompressData(&p)
+                CorSigUncompressData(&p), bounds.Push(CorSigUncompressData(&p))
+            return RtCArrayType(ele, bounds)
         case 0x15: ; GENERICINST <generic type> <argCnt> <arg1> ... <argn>
             return _rt_DecodeSigGenericInst(m, &p, p2, typeArgs)
         case 0x1F, 0x20: ; CMOD <typeDef/Ref> ...
