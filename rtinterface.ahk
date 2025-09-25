@@ -115,7 +115,7 @@ class RtTypeInfo {
                 flags: flags,
                 name: StrGet(namebuf, namelen, "UTF-16"),
                 ; Signature should be CALLCONV_FIELD (6) followed by a single type.
-                type: _rt_DecodeSigType(this.m, &p:=psig+1, psig+nsig, this.typeArgs),
+                type: _rt_DecodeSigType(this.m, &p:=psig+1, psig+nsig, this.typeArgs, this.t),
             }
             if flags & 0x8000 ; fdHasDefault
                 f.value := _rt_GetFieldConstant(this.m, ft)
@@ -337,7 +337,7 @@ _rt_DecodeSigGenericInst(m, &p, p2, typeArgs:=false) {
     return WinRT.TypeCache[tname] := t
 }
 
-_rt_DecodeSigType(m, &p, p2, typeArgs:=false) {
+_rt_DecodeSigType(m, &p, p2, typeArgs:=false, mdScope := 0) {
     static primitives := _rt_GetElementTypeMap()
     static modifiers := Map(
         0x0f, RtPtrType,
@@ -348,10 +348,10 @@ _rt_DecodeSigType(m, &p, p2, typeArgs:=false) {
     if t := primitives.get(b, 0)
         return t
     if modt := modifiers.get(b, 0)
-        return modt(_rt_DecodeSigType(m, &p, p2, typeArgs))
+        return modt(_rt_DecodeSigType(m, &p, p2, typeArgs, mdScope))
     switch b {
         case 0x11, 0x12: ; value type, class type
-            return m.GetTypeByToken(CorSigUncompressToken(&p))
+            return m.GetTypeByToken(CorSigUncompressToken(&p), , mdScope)
         case 0x13: ; generic type parameter
             if typeArgs
                 return typeArgs[NumGet(p++, "uchar") + 1]

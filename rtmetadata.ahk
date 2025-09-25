@@ -169,8 +169,8 @@ class MetaDataModule {
         }
     }
     
-    FindTypeDefByName(name) {
-        ComCall(9, this, "wstr", name, "uint", 0, "uint*", &r:=0)
+    FindTypeDefByName(name, scope := 0) {
+        ComCall(9, this, "wstr", name, "uint", scope, "uint*", &r:=0)
         return r
     }
     

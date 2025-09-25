@@ -134,12 +134,16 @@ class WinRT {
 }
 
 class RtMetaDataModule extends MetaDataModule {
-    GetTypeByToken(t, typeArgs:=false) {
-        scope := -1
+    GetTypeByToken(t, typeArgs := false, mdScope := 0) {
         switch (t >> 24) {
         case 0x01: ; TypeRef (most common)
-            ; TODO: take advantage of GetTypeRefProps's scope parameter
-            return WinRT.GetType(this.GetTypeRefProps(t), this)
+            name := this.GetTypeRefProps(t, &scope)
+            try return WinRT.GetType(name, this)
+            catch ValueError
+                ; In a nested class, there may be multiple TypeDef with the same name, but only one TypeRef.
+                ; At this time, the TypeDef token of the enclosing class is required
+                ; to find the TypeDef corresponding to the TypeRef.
+                return RtTypeInfo(this, this.FindTypeDefByName(name, mdScope || scope))
         case 0x02: ; TypeDef
             ; MsgBox 'DEBUG: GetTypeByToken was called with a TypeDef token.`n`n' Error().Stack
             ; TypeDefs usually aren't referenced directly, so just resolve it by
