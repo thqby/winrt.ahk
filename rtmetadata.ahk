@@ -72,6 +72,10 @@ class MetaDataModule {
     CreateClassWrapper(t) {
         w := _rt_CreateClass(classname := t.Name, t.SuperType.Class)
         t.DefineProp 'Class', {value: w}
+        wrapped := Map(), prop_count := 1
+        ; Add instance interfaces:
+        ; __DefaultInterface may be required when initializing GUID.
+        addRequiredInterfaces(w.prototype, t, true)
         ; Add any constructors:
         this.AddFactoriesToWrapper(w, t)
         ; Add static interfaces to the class:
@@ -79,7 +83,7 @@ class MetaDataModule {
             this.AddInterfaceToWrapper(w, ti)
         }
         ; Need a factory?
-        if ObjOwnPropCount(w) > 1 {
+        if ObjOwnPropCount(w) > prop_count {
             static oiid := GUID("{AF86E2E0-B12D-4c6a-9C5A-D7AA65101E90}") ; IInspectable
             hr := DllCall("combase.dll\RoGetActivationFactory"
                 , "ptr", HStringFromString(classname)
@@ -118,7 +122,6 @@ class MetaDataModule {
                     w.DefineProp(f.name, { value: f.value })
             }
         }
-        wrapped := Map()
         addRequiredInterfaces(wp, t, isclass) {
             for ti, impl in t.Implements() {
                 ; GetCustomAttributeByName
@@ -129,7 +132,8 @@ class MetaDataModule {
                     ; This is currently assigned to the Class and not t so that
                     ; t.Class.__DefaultInterface will cause this code to execute
                     ; if needed (i.e. if the class hasn't been wrapped yet).
-                    w.DefineProp '__DefaultInterface', {value: ti}
+                    w.DefineProp '__DefaultInterface', { value: ti }
+                    prop_count := 2
                 }
                 if wrapped.has(ti_name := ti.Name)
                     continue
@@ -140,8 +144,6 @@ class MetaDataModule {
                 addRequiredInterfaces(wp, ti, false)
             }
         }
-        ; Add instance interfaces:
-        addRequiredInterfaces(w.prototype, t, true)
         return w
     }
     
