@@ -138,6 +138,8 @@ class WinRT {
 }
 
 class RtMetaDataModule extends MetaDataModule {
+    ; Cache typeinfo that is in nested classes
+    cache => _rt_memoize(this, 'cache', _ => Map())
     GetTypeByToken(t, typeArgs := false, mdScope := 0) {
         switch (t >> 24) {
         case 0x01: ; TypeRef (most common)
@@ -147,14 +149,19 @@ class RtMetaDataModule extends MetaDataModule {
                 ; In a nested class, there may be multiple TypeDef with the same name, but only one TypeRef.
                 ; At this time, the TypeDef token of the enclosing class is required
                 ; to find the TypeDef corresponding to the TypeRef.
-                return RtTypeInfo(this, this.FindTypeDefByName(name, mdScope || scope))
+                t := this.FindTypeDefByName(name, mdScope || scope)
+get_type:
+            cache := this.cache
+            return cache.Get(t, 0) || cache[t] := RtTypeInfo(this, t)
         case 0x02: ; TypeDef
             ; MsgBox 'DEBUG: GetTypeByToken was called with a TypeDef token.`n`n' Error().Stack
             ; TypeDefs usually aren't referenced directly, so just resolve it by
             ; name to ensure caching works correctly.  Although GetType resolving
             ; the TypeDef will be a bit redundant, it should perform the same as
             ; if a TypeRef token was passed in.
-            return WinRT.GetType(this.GetTypeDefProps(t), this)
+            try return WinRT.GetType(this.GetTypeDefProps(t), this)
+            catch ValueError
+                goto get_type
         case 0x1b: ; TypeSpec
             ; GetTypeSpecFromToken
             ComCall(44, this, "uint", t, "ptr*", &psig:=0, "uint*", &nsig:=0)
