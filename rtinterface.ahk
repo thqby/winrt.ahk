@@ -2,44 +2,29 @@
 #include ffi.ahk
 
 class RtTypeInfo {
-    static Call(mdm, token, typeArgs:=false) {
+    __new(mdm, token, typeArgs:=false) {
+        this.m := mdm
+        this.t := token
+        this.typeArgs := typeArgs
+        
         ; Determine the base type and corresponding RtTypeInfo subclass.
-        name := mdm.GetTypeDefProps(token, &flags, &tbase)
-        IsSealed := flags & 0x100 ; tdSealed (not composable; can't be subclassed)
-        base := RtTypeInfo.Prototype
+        mdm.GetTypeDefProps(token, &flags, &tbase)
+        this.IsSealed := flags & 0x100 ; tdSealed (not composable; can't be subclassed)
+        this.flags := flags
         switch {
             case flags & 0x20:
-                base := RtTypeInfo.Interface.Prototype
+                this.base := RtTypeInfo.Interface.Prototype
             case (tbase & 0x00ffffff) = 0:  ; Nil token.
-                throw Error(Format('Type "{}" has no base type or interface flag (flags = 0x{:x})', name, flags))
+                throw Error(Format('Type "{}" has no base type or interface flag (flags = 0x{:x})', this.Name, flags))
             default:
                 basetype := mdm.GetTypeByToken(tbase)
                 if basetype is RtTypeInfo
-                    base := basetype.base
+                    this.base := basetype.base
                 else if basetype.hasProp('TypeClass')
-                    base := basetype.TypeClass.Prototype
+                    this.base := basetype.TypeClass.Prototype
                 ;else: just leave RtTypeInfo as base.
-
-                ; some win32 types are defined as structure
-                if basetype.Name = 'Struct' {
-                    ComCall(20, mdm, 'ptr*', &henum := 0, 'uint', token, 'ptr', buf := Buffer(8), 'uint', 2, 'uint*', &cTokens := 0, 'int')
-                    ComCall(3, mdm, 'uint', henum, 'int')
-                    if cTokens = 1 {
-                        namebuf := Buffer(2 * MAX_NAME_CCH)
-                        ComCall(57, mdm, 'uint', NumGet(buf, 'uint'), 'ptr', 0
-                            , 'ptr', namebuf, 'uint', namebuf.size // 2, 'uint*', &namelen := 0
-                            , 'ptr*', &flags := 0, 'ptr*', &psig := 0, 'uint*', &nsig := 0
-                            , 'ptr', 0, 'ptr', 0, 'ptr', 0)
-                        if StrGet(namebuf, namelen, 'UTF-16') = 'Value' {
-                            type := String(_rt_DecodeSigType(mdm, &p := psig + 1, psig + nsig))
-                            if type = 'Void*'
-                                return FFITypes.IntPtr
-                            try return FFITypes.%type%
-                        }
-                    }
-                }
+                this.SuperType := basetype
         }
-        return { base: base, m: mdm, t: token, flags: flags, typeArgs: typeArgs, IsSealed: IsSealed, SuperType: basetype? }
     }
     
     class Interface extends RtTypeInfo {
@@ -57,7 +42,10 @@ class RtTypeInfo {
     class Struct extends RtTypeInfo {
         Class => _rt_CreateStructWrapper(this)
         Size => this.Class.Prototype.Size
-        ReadWriteInfo => ReadWriteInfo.FromClass(this.Class)
+        ; some win32 types are defined as structure,
+        ; they have NativeTypedefAttribute and revert to the basic type.
+        ArgPassInfo => (cls := this.Class) ? false : this.ArgPassInfo
+        ReadWriteInfo => (cls := this.Class) ? ReadWriteInfo.FromClass(cls) : this.ReadWriteInfo
     }
     
     class Enum extends RtTypeInfo {

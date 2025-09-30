@@ -223,6 +223,16 @@ class MetaDataModule {
             return StrGet(namebuf, namelen, "UTF-16")
         }
     }
+
+    HasNativeTypedefAttr(td) {
+        if this.Name = "Windows.Win32.winmd" && !ComCall(55, this, "uint", 1, "wstr",
+            "Windows.Win32.Foundation.Metadata.NativeTypedefAttribute", "uint*", &tr := 0, "int") &&
+            _rt_Enumerator(23, this, "uint", tr)(&tctor)
+            cb := (this, td) => this.EnumCustomAttributes(td, tctor)(&_)
+        else cb := (*) => 0
+        this.DefineProp('HasNativeTypedefAttr', { call: cb })
+        return cb(this, td)
+    }
     
     static Open(path) {
         static CLSID_CorMetaDataDispenser := GUID("{E5CB7A31-7512-11d2-89CE-0080C792E5D8}")
@@ -667,7 +677,17 @@ _rt_CreateStructWrapper(t) {
     wp := w.prototype
     offset := 0, alignment := 1
     readwriters := Map(), destructors := []
-    for f in t.Fields() {
+    fields := [t.Fields()*], fl := fields.Length
+    if fl == 1 && t.m.HasNativeTypedefAttr(t.t) {
+        ft := (f := fields[1]).type
+        t.base := ft.base
+        t.DeleteProp('SuperType')
+        t.DeleteProp('Class'), t.Name := w.Prototype.__class
+        for k in ['ArgPassInfo', 'ReadWriteInfo']
+            t.DefineProp(k, { value: ft.%k% })
+        return
+    }
+    for f in fields {
         ft := f.type
         rwi := ReadWriteInfo.ForType(ft)
         fsize := rwi.Size
