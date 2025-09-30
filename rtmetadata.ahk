@@ -697,7 +697,14 @@ _rt_CreateStructWrapper(t) {
     offset := 0, alignment := 1
     readwriters := Map(), destructors := []
     fields := [t.Fields()*], fl := fields.Length
-    if fl == 1 && t.m.HasNativeTypedefAttr(t.t) {
+    isExplicitLayout := t.flags & 0x10
+    if isExplicitLayout {
+        ; GetClassLayout
+        ComCall(37, t.m, 'uint', t.t, 'uint*', &packSize := 0,
+            'ptr', fieldOffsetes := Buffer(8 * fl),
+            'uint', fl, 'uint*', 0, 'ptr', 0)
+        p := fieldOffsetes.Ptr - 4, ssize := 0
+    } else if fl == 1 && t.m.HasNativeTypedefAttr(t.t) {
         ft := (f := fields[1]).type
         t.base := ft.base
         t.DeleteProp('SuperType')
@@ -711,7 +718,9 @@ _rt_CreateStructWrapper(t) {
         rwi := ReadWriteInfo.ForType(ft)
         fsize := rwi.Size
         falign := rwi.HasProp('Align') ? rwi.Align : fsize
-        offset := align(offset, fsize)
+        if isExplicitLayout
+            ssize := Max(ssize, fsize + offset := NumGet(p += 8, 'uint'))
+        else offset := align(offset, fsize)
         wp.DefineProp f.name, {
             get: reader := rwi.GetReader(offset),
             set: writer := rwi.GetWriter(offset)
@@ -723,6 +732,8 @@ _rt_CreateStructWrapper(t) {
             alignment := falign
         offset += fsize
     }
+    if isExplicitLayout
+        offset := ssize, alignment := packSize || alignment
     align(n, to) => (n + (to - 1)) // to * to
     w.DefineProp 'Align', {value: alignment}
     wp.DefineProp 'Size', {value: align(offset, alignment)}
