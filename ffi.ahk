@@ -64,6 +64,9 @@ class RtRootTypes extends FFITypes {
             ['Struct', {
                 TypeClass: RtTypeInfo.Struct,
             }],
+            ['Type', {
+                TypeClass: RtTypeInfo.Type,
+            }],
         ]
         for t in t {
             bti := this.%t[1]% := BasicTypeInfo(t*)

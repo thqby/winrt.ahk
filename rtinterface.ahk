@@ -61,6 +61,10 @@ class RtTypeInfo {
         ; Just for identification. Attributes are only used in metadata.
     }
     
+    class Type extends RtTypeInfo {
+        ; Just for identification. Types are only used in metadata.
+    }
+    
     ArgPassInfo => false
     ReadWriteInfo => false
     

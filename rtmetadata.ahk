@@ -197,6 +197,25 @@ class MetaDataModule {
             , "ptr", namebuf, "uint", namebuf.size//2, "uint*", &namelen:=0)
         return StrGet(namebuf, namelen, "UTF-16")
     }
+
+    GetCustomAttributeProps(cv, arg_types := 0) {
+        static types_as_string := Map(RtRootTypes.String, 1, RtRootTypes.Type, 1)
+        ComCall(54, this, "uint", cv, "ptr", 0, "uint*", &tkType := 0,
+            "ptr*", &pdata := 0, "uint*", &ndata := 0)
+        p := pdata + 2, args := []
+        if !arg_types {
+            ; GetMemberRefProps
+            ComCall(31, this, "uint", tkType, "uint*", &tk := 0, "ptr", 0,
+                "uint", 0, "ptr", 0, "ptr*", &psig := 0, "uint*", &nsig := 0)
+            (arg_types := _rt_DecodeSig(this, psig, nsig)).RemoveAt(1)
+            args.name := this.GetTypeRefProps(tk)
+        }
+        for t in arg_types
+            if types_as_string.Has(t)
+                args.Push(StrGet({ ptr: p, size: t := CorSigUncompressData(&p) }, 'utf-8')), p += t
+            else args.Push((rwi := ReadWriteInfo.ForType(t)).GetReader()(p)), p += rwi.Size
+        return args
+    }
     
     GetGuidPtr(td) {
         ; GetCustomAttributeByName
