@@ -69,6 +69,11 @@ class RtTypeInfo {
     ReadWriteInfo => false
     
     Name => this.ToString()
+
+    /** @type {RtMetaDataModule} */
+    static Prototype.m := 0
+    static Prototype.t := 0
+    static Prototype.typeArgs := 0
     
     ToString() {
         name := this.m.GetTypeDefProps(this.t)
@@ -104,7 +109,7 @@ class RtTypeInfo {
                 , "ptr*", &flags:=0, "ptr*", &psig:=0, "uint*", &nsig:=0
                 , "ptr", 0, "ptr", 0, "ptr", 0)
             f := {
-                flags: flags,
+                flags: flags, t: ft,
                 name: StrGet(namebuf, namelen, "UTF-16"),
                 ; Signature should be CALLCONV_FIELD (6) followed by a single type.
                 type: _rt_DecodeSigType(this.m, &p:=psig+1, psig+nsig, this.typeArgs, this.t),

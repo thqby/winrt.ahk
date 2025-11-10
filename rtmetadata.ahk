@@ -97,8 +97,9 @@ class MetaDataModule {
             for method in t.Methods() {
                 if !(method.flags & 0x10)   ; Static
                     break
-                if !index := _rt_FindTableIndex(mdt, 0x1c, 1, method.t)
+                if !index := _rt_FindTableIndex(mdt, 0x1c, 1, index := method.t, index & 0xffffff)
                     break
+                cdecl := NumGet(method.sig, "uchar") == 5
                 types := t.MethodArgTypes(method.sig)
                 ; ImportName
                 ComCall(13, mdt, "uint", 0x1c, "uint", 2, "uint", index, "uint*", &value := 0)
@@ -353,11 +354,11 @@ _rt_CacheAttributeCtors(mdi, o, retprop) {
     return o.HasOwnProp(retprop) ? o.%retprop% : -1
 }
 
-_rt_FindTableIndex(mdt, tabIndex, colIndex, findVal) {
+_rt_FindTableIndex(mdt, tabIndex, colIndex, findVal, k?) {
     static GetTableInfo := 9, GetColumn := 13
     ComCall(GetTableInfo, mdt, "uint", tabIndex
         , "ptr", 0, "uint*", &cRows := 0, "ptr", 0, "ptr", 0, "ptr", 0)
-    i := 1, k := cRows
+    i := 1, k := IsSet(k) ? Min(k, cRows) : cRows
     ; Assume that the table is ordered
     while i <= k {
         ComCall(GetColumn, mdt, "uint", tabIndex, "uint", colIndex, "uint", index := (k + i) >> 1, "uint*", &value := 0)
@@ -378,7 +379,7 @@ _rt_FindTableIndex(mdt, tabIndex, colIndex, findVal) {
 _rt_GetFieldConstant(mdi, field) {
     static tabConstant := 11,  colType := 0, colParent := 1, colValue := 2, GetColumn := 13, GetBlob := 15
     mdt := ComObjQuery(mdi, "{D8F579AB-402D-4B8E-82D9-5D63B1065C68}") ; IMetaDataTables
-    if !index := _rt_FindTableIndex(mdt, tabConstant, colParent, field)
+    if !index := _rt_FindTableIndex(mdt, tabConstant, colParent, field, field & 0xffffff)
         return
     ComCall(GetColumn, mdt, "uint", tabConstant, "uint", colValue, "uint", index, "uint*", &value := 0)
     ComCall(GetBlob, mdt, "uint", value, "uint*", &ndata := 0, "ptr*", &pdata := 0)
@@ -645,6 +646,7 @@ class RtAny {
     __set(name, *) {
         throw PropertyError(Format('This value of type "{}" has no property named "{}".', type(this), name), -1)
     }
+    ;@lint-disable class-non-dynamic-member-check
 }
 
 class RtObject extends RtAny {

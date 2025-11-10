@@ -47,6 +47,7 @@ class RtNamespace {
         ; Subsequent calls to _populate() should have no effect.
         this.DefineProp '_populate', {call: IsObject}
         ; Find any direct child namespaces defined in files (for Windows and Windows.UI).
+        if !this._path
         Loop Files A_WinDir "\System32\WinMetadata\" this._name ".*.winmd", "F" {
             name := SubStr(A_LoopFileName, StrLen(this._name) + 2)
             name := SubStr(name, 1, InStr(name, ".") - 1)
